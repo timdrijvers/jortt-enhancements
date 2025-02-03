@@ -3,12 +3,12 @@
 // @namespace    https://www.gears-for-engineers.com/
 // @version      2024-03-01
 // @description  Make an overview of all registered hours, default fixed hourly rate
-// @license      MIT
-// @author       timdrijvers
+// @author       Tim Drijvers
 // @match        https://app.jortt.nl/*
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=jortt.nl
 // @grant        GM.setValue
 // @grant        GM.getValue
+// @grant        GM.download
 // ==/UserScript==
 
 (function() {
@@ -87,12 +87,55 @@
         return match[1];
     }
 
+    function downloadExpenses(selected_year, current_page){
+        const request_url = '/next_js/page/expenses/list?period_date='+selected_year+'-01-01&period_cycle=year&current_page='+current_page;
+
+        console.log("Download: "+selected_year+" page: "+current_page);
+        GM.download(request_url, "expenses-"+selected_year+"-"+current_page+".json");
+
+
+        fetch(
+            request_url, {method: 'GET'})
+            .then(Result => Result.json())
+            .then(response => {
+
+            for (const expense of response.expenses) {
+                const expense_name = expense.ledger_account_name+ ": "+expense.description.replace("\n", " ");
+                if(expense.receipt_record) {
+                    console.log("Download: "+expense_name+" | "+expense.receipt_record.original_url);
+                    GM.download({
+                        url: expense.receipt_record.original_url,
+                        name: expense.receipt_record.description,
+                    });
+                } else {
+                    console.log("Warning: "+expense_name+" no receipt");
+                }
+            }
+
+            if(current_page < response.total_pages) {
+                downloadExpenses(selected_year, current_page+1);
+            }
+
+        });
+
+    }
+
     ////////////////////////////////////////////////////////////////////////
     // Callback functions that do the actual work.
     // Get triggered based on new elements with an ID of the map below
     ////////////////////////////////////////////////////////////////////////
 
     const callbackFunctions = {
+        "expenses-list": (node) => {
+            let button_bar = node.querySelector("#spec-panel-actions");
+            let download_button = elem("a", {"data-tooltip":"Boeking", "color": "add"}, "Download")
+            button_bar.appendChild(download_button);
+
+            download_button.addEventListener("click", function(){
+                let selected_year = node.querySelector("#spec-period-selector-title span").textContent;
+                downloadExpenses(selected_year, 1);
+            });
+        },
         "projects-new": (node) => {
             //
             // Allow user to set a default hourly rate when editing a project
@@ -105,7 +148,7 @@
             }
             const cacheKey = "fixedprice:" + projectId;
 
-            let rootForm = node.shadowRoot.querySelector("form");
+            let rootForm = node.querySelector("form");
             injectCSS(
                 rootForm,
                 ".timd-custom-form div.button {display: flex; align-items: flex-end; justify-content: end; margin-top: 16px;}\n"+
@@ -147,7 +190,7 @@
             const cacheKey = "fixedprice:" + projectId;
             GM.getValue(cacheKey, "").then((fixedPrice) => {
                 if (fixedPrice !== "") {
-                    triggerInput(node.shadowRoot.querySelector("input[name='line_item_amount']"), fixedPrice);
+                    triggerInput(node.querySelector("input[name='line_item_amount']"), fixedPrice);
                 }
             });
         },
@@ -156,8 +199,10 @@
             // Render a table with all hours of projects aggregated in a single overview for this month
             //
 
+            console.log(node);
+
             // Create our own container
-            let rootContainer = node.shadowRoot.querySelector("div[class*='PageLayout__Scrollable']");
+            let rootContainer = node.querySelector("div[class*='PageLayout__Scrollable']");
             let container = whiteContainer();
             rootContainer.appendChild(container);
 
